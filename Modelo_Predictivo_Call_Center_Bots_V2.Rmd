@@ -1,0 +1,1142 @@
+---
+title: <b>Modelo Predictivo para entidades que contratan servicios de Call Center con terceros basado en datos de Normas Estandar COPC</b>
+author: "Adrian Felipe Pinzon Hurtado (apinzonh)"
+output:
+  html_document:
+    code_folding: hide
+    number_sections: yes
+    theme: cerulean 
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+    includes:
+    in_header: LOGO_3_HEADER.html
+  pdf_document:
+    highlight: zenburn
+    toc: yes
+  word_document: default
+---
+
+```{r pressure, echo=FALSE, out.width = '100%'}
+knitr::include_graphics("LOGO_3_HEADER.png")
+```
+
+```{r ,include=FALSE, message= FALSE, warning=FALSE}
+knitr::opts_chunk$set(eval=T, echo=T)
+#setwd("~/Master UOC - Ciencias de Datos/Minería de Datos/Modelo Predictivo AHT")
+#setwd("~/Master UOC - Ciencias de Datos/Minería de Datos/Modelo Predictivo AHT")
+
+#setwd("C:/Users/Usuario/Documents/Master UOC - Ciencias de Datos/Minería de Datos/Modelo Predictivo AHT")
+#setwd("C:/Users/Usuario/Documents/Master UOC - Ciencias de Datos/TFM/Call_Center")
+setwd("~/Master UOC - Ciencias de Datos/TFM/Call_Center")
+
+#install.packages("readxl")
+#install.packages("xlsx")
+library(stringr)
+library(readxl)
+library(dplyr)
+library(quanteda)
+library(tm)
+library(ggplot2)
+library(topicmodels)
+library(tidytext)
+#library(ggplot2)
+library(stringdist)
+library(sqldf)
+library(lattice)
+library(survival)
+library(Formula)
+library(Hmisc)
+library(lubridate)
+library(MASS)
+library(tidyverse)
+library(data.table)
+library(VIM)
+#install.packages("ResourceSelection")
+library(knitr)
+library(gridExtra)
+library(grid)
+library(kableExtra)
+library(magrittr)
+library(xtable)
+library(tidyr)
+library(hms)
+#install.packages("ggpubr")
+#library(ggpubr)
+library(reshape2)
+#install.packages("PASWR")
+#library(PASWR)
+library(car)
+knitr::opts_chunk$set(echo = TRUE)
+library(GGally)
+library(faraway)
+library(epiR)
+library(ResourceSelection)
+library(ROCR)
+#library(xlsx)
+
+
+```
+# <b>Repositorio</b>
+<p>
+https://github.com/adrife20/PEC3_TFM_adpinzon
+</p>
+
+# <b>Presentación y problemática (desafío)</b>
+<p>La gran mayoría de las empresas contratan los servicio de call center con un externo (proveedor). Actualmente, con el auge de los bots, muchos de estos proveedores ofrecen un paquete que incluye atención de agentes humanos y bots. Estos nuevos paquetes de facturación se ofrecen en rangos de contactos mensuales llamados líneas bases, los cuales tienen un precio dependiendo del rango que estés dispuesto a pagar y tambien los promedio de contactos que se recibe mensualmente. </p>
+
+<p> La mayoría de las empresas necesitan un modelo estadístico que les pueda dar ese precio ideal teniendo en cuenta los datos con los que cuentan, que es el costo actual de su call center, los indicadores COPC y lo que está atendiéndose por bots. En la mayoría de estos contratos, las empresas contratan el servicio sin tener en cuenta número de asesores humanos, como sí lo hace el proveedor, quien tiene para eso modelos muy maduros en el mercado como Erlang o ARIMA. Esto debido que la administración de ese personal no es core de las empresas, más sí de los call center. </p>
+
+<p> El dataset cuenta con un histórico de estas facturaciones mensuales por call center, junto con todos los indicadores COPC, eventos masivos,  número de contactos por bots, casos por masivos y disponibilidad de los canales. El proveedor contractualmente jamás revela su número de asesores, porque es una estrategia de ahorro de costos que utilizan. Por ejemplo, pueden poner un asesor para que conteste hasta tres chats simultáneos o una llamada y una chat simultáneo, ya que este último canal tiene un mayor ASA, es decir, el usuario puede esperar un poco más a que le contesten (en esta data, está convenido hasta 60 segundos para contestar por chat). </p>
+
+<p>El reto es poder predecir una nueva tabla de precios ideales para negociar un RFP (Request for Proposals) o solicitud de propuestas. </p>
+
+# <b>Descripción del Dataset</b>
+<p> Se relacionan a continuación la descripción de cada variable:  </p>
+
+
+```{r, echo=FALSE}
+text_tbl <- data.frame(
+  Variable = c(
+    "Mesa",
+    "Fecha",
+    "Contactos_Atendidos_telefono (*)",
+    "Contactos_Atendidos_Chat (*)",
+    "Contactos_Atendidos_Bot (*)",
+    "Contactos_Atendidos_autoreporte_gestion_indirecta (*)",
+    "Contactos_ofrecidos (*)",
+    "Contestados_Chat < Umbral (*)",
+    "Contestado_Tel < Umbral (*)",
+    "AHT_Tel_min (*)",
+    "AHT_Chat_min (*)",
+    "SD06_ASA_Correo (*)",
+    "gestion_autoreporte (*)",
+    "SD05_Disponibilidad_de_la_mesa_de_servicio (**)",
+    "Numero de masivos",
+    "Linea Base",
+    "AHT Tel en segundos (*)",
+    "AHT Chat en segundos (*)",
+    "Costo Mesa",
+    "Costo adiccionales en mesa",
+    "AHT Autoreporte(web) (*)"
+    
+  ),
+  Descripcion = c(
+    "(tipo factor) Mesa (tecnología u operaciones). Variable categórica discreta",
+    "(tipo fecha) Fecha del registro de la información. Ej.: 08/2016. Variable continua",
+    "(tipo entero) Contactos atendidos en el canal teléfono. Ej.: 45739. Variable continua",
+    "(tipo entero) Contactos atendidos en el canal Chat. Ej.: 15013. Variable continua",
+    "(tipo entero) Contactos atendidos por el bot. Ej.: 2618. Variable continua",
+    "(tipo entero) Contactos atendidos por autoreporte (web). Ej.: 4298. Variable continua",
+    "(tipo entero) Contactos que entraron (contestados o no). Ej.: 79066. Variable continua",
+    "(tipo entero) Contactos contestados en Chat <  Umbral, es decir, contestados antes de los 60 seg desde que entró al chat.  Ej.: 9667. Variable continua",
+    "(tipo entero) Contactos contestados en teléfono <  Umbral, es decir, contestados antes de los 25 seg desde que entró al chat.  Ej.: 34158 Variable continua",
+    "(tipo date) AHT en teléfono (tiempo que duró una llamada contestada en MM:SS).  Ej.: 12:15 . Variable continua",
+    "(tipo date) AHT en Chat (tiempo que duró una llamada contestada en MM:SS).  Ej.: 16:15. Variable continua",
+    "(tipo entero)  Tiempo de respuesta (Average Speed of Answer). Indica cuánto tiempo esperó un cliente para ser atendido. Ej: 11.79 segundos. Variable continua",
+    "(tipo doble) Tiempo en segundos para Gestion de autoreporte. Ej: 13. Variable continua",
+        "(tipo doble) Indicador que mide cuánto estuvo un componente tecnológico indisponible. Ejemplo: canal de teléfono, canal de chat, bot, web autoreporte. La meta debe ser 100%. Fórmula: [1-sumatoria(Tiempo componente indisponible*peso componente)/total tiempo]. Ej: 100% o 1. Variable continua",
+    "(tipo entero) Número de eventos masivos que afectaron el servicio expresado en contactos. Ej: 1740 contactos por masivos",
+    "(tipo entero) Número de contactos base para ese periodo (lo que se esperaba atender contractualmente). Ej: 64308 contactos. Variable continua",
+    "(tipo entero) (Average Handle Time o Average Handling Time) Teléfono en segundos, es un KPI que nos ayuda a entender el tiempo medio de las interacciones con clientes en un contact center. Ej: 725 segundos. Variable continua ",
+    "(tipo entero) (Average Handle Time o Average Handling Time) Chat en segundos, es un KPI que nos ayuda a entender el tiempo medio de las interacciones con clientes en un contact center. Ej: 975 segundos. Variable continua ",
+    "(tipo doble) Costo del servicio. Ej: COP 660.029.876,86. Variable continua ",
+    "(tipo doble) Costo por otros conceptos (Ej: mejora bot, nueva infra). Ej: COP 717.560.654,99. Variable continua ",
+    "(tipo entero) (Average Handle Time o Average Handling Time) de web en segundos.  Ej: 722 segundos. Variable continua "
+
+  ))
+
+kable(text_tbl,caption = "TABLA RESUMEN VARIABLES DATA 'TEST'") %>%
+  kable_styling(latex_options="scale_down", position = "left") %>%
+  row_spec(1, bold = T, color = "gray", background = "#EAF5F9") %>%
+  row_spec(2, bold = T, color = "gray", background = "#DAF5FD") %>%
+  row_spec(3, bold = T, color = "gray", background = "#CAF2FF") %>%
+  row_spec(4, bold = T, color = "gray", background = "#B9EFFF") %>%
+  row_spec(5, bold = T, color = "gray", background = "#A1E9FF") %>%
+  row_spec(6, bold = T, color = "white", background = "#49CFF7") %>%
+  row_spec(7, bold = T, color = "white", background = "#11C3F9") %>%
+  row_spec(8, bold = T, color = "white", background = "#0E9CC7") %>%
+  row_spec(9, bold = T, color = "white", background = "#147F9F") %>%
+  row_spec(10, bold = T, color = "white", background = "#156077") %>%
+  row_spec(11, bold = T, color = "white", background = "#156077") %>%
+    row_spec(12, bold = T, color = "white", background = "#156077") %>%
+    row_spec(13, bold = T, color = "white", background = "#156077") %>%
+    row_spec(14, bold = T, color = "white", background = "#156077") %>%
+    row_spec(15, bold = T, color = "white", background = "#156077") %>%
+    row_spec(16, bold = T, color = "white", background = "#156077") %>%
+    row_spec(17, bold = T, color = "white", background = "#156077") %>%
+    row_spec(18, bold = T, color = "white", background = "#156077") %>%
+    row_spec(19, bold = T, color = "white", background = "#156077") %>%
+    row_spec(20, bold = T, color = "white", background = "#156077") %>%
+    row_spec(21, bold = T, color = "white", background = "#156077") %>%
+  add_footnote(c("(*) Corresponden a norma COPC. (**) Corresponde a metodología ITIL."), notation = "symbol")
+```
+# <b>Limpieza y preprocesamiento de datos</b>
+
+```{r ,echo=FALSE, warning=FALSE}
+
+#con precios hist?ricos desde 2016
+#df = read_excel('procesado_VOLUMEN_AHT_consolidado_costo.xlsx',sheet = 'Consolidado',col_names = TRUE,col_types = c("text","date","numeric","numeric","numeric","numeric","numeric","numeric","numeric","date","date","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric"), na = "", skip = 0)
+
+#con precios desde agosto de 2019, que era nuevo RFP
+#library(xlsx)
+
+df = read_excel('procesado_VOLUMEN_AHT_consolidado_costo_RFP_V2.xlsx',sheet = 'Consolidado',col_names = TRUE,col_types = c("text","date","numeric","numeric","numeric","numeric","numeric","numeric","numeric","date","date","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric","numeric"), na = "", skip = 0)
+
+
+df$Fecha <- format(as.Date(df$Fecha), "%Y-%m")
+
+cols.SQLborrar <- c("AHT_Tel_min","AHT_Chat_min")# se elimina por contar con los datos en segundos
+
+df <- df[, ! names(df) %in% cols.SQLborrar, drop = F]
+
+#summary(Data)
+#SD07_inicio_ gestion_autoreporte,
+
+df <- tibble::rowid_to_column(df, "ID")
+
+#df <- df[df$Mesa =="Tecnologia", ]
+
+tabla_h  <- sqldf('SELECT ID,Mesa,Fecha,Contactos_Atendidos_telefono,
+Contactos_Atendidos_Chat,
+Contactos_Atendidos_Chatbot,
+Contactos_autoreporte_gestion_indirecta,
+Contactos_ofrecidos,
+Contestados_Chat_men_Umbral,
+Contestado_Tel_men_Umbral,
+SD06_ASA_Correo,
+SD05_Disponibilidad_de_la_mesa_de_servicio,
+gestion_autoreporte,
+No_masivos,
+Linea_Base,
+AHT_Tel_seg,
+AHT_chat_seg,
+Costo
+FROM df ORDER BY ID LIMIT 10')
+
+kable(tabla_h) %>%
+  kable_styling(latex_options="scale_down", position = "left") %>%
+  row_spec(1, bold = T, color = "gray", background = "#EAF5F9") %>%
+  row_spec(2, bold = T, color = "gray", background = "#DAF5FD") %>%
+  row_spec(3, bold = T, color = "gray", background = "#CAF2FF") %>%
+  row_spec(4, bold = T, color = "gray", background = "#B9EFFF") %>%
+  row_spec(5, bold = T, color = "gray", background = "#A1E9FF") %>%
+  row_spec(6, bold = T, color = "white", background = "#49CFF7") %>%
+  row_spec(7, bold = T, color = "white", background = "#11C3F9") %>%
+  row_spec(8, bold = T, color = "white", background = "#0E9CC7") %>%
+  row_spec(9, bold = T, color = "white", background = "#147F9F") %>%
+  row_spec(10, bold = T, color = "white", background = "#156077") %>%
+  add_footnote(c("Muestra de variables tomadas en cuenta para el modelo"), notation = "symbol")
+
+
+
+```
+
+## Análisis Inicial
+```{r ,echo=TRUE, warning=FALSE}
+summary(df)
+```
+Se observan 37 valores nulos en costos, puesto que era otro RFP con otras condiciones. En ASA Correo y gestión de autoreporte tambien existen datos nulos. </p>
+
+```{r ,echo=FALSE, warning=FALSE}
+
+dfAP<- c()
+dfAP <-data.frame(df)
+
+#dfAP["segmento_LB"] <- cut(dfAP$Linea_Base, breaks = c(0,45102,47755,50408,53061,55714,58367,61020,63673,66326,68979,71632,74285), #13
+#labels = c("LB 0-45102", "LB 45103-47755","LB 47756-50408","LB 50409-53061","LB 53062-55714","LB 55715-58367","LB 58368-61020","LB 61021-63673","LB 63674-66326","LB 66327-68979","LB 68979-71632","LB 71632-74385")) #12
+# Observamos los datos discretizados.
+#head(df3)
+# Vemos como se agrupan los datos.
+#plot(df$segmento_LB)
+#filas1=dim(dfAP)[1]
+#ggplot(data=dfAP[1:filas1,],aes(x=Mesa,fill=segmento_LB))+geom_bar()
+
+
+```
+<p>Se observa que la mesa de operaciones sólo se ha movido entre una sola línea base, mientras que la mesa de tecnología ha tenido varias líneas bases.</p>
+
+## Agrupaciones
+```{r ,echo=TRUE, warning=FALSE}
+
+
+
+```
+
+Realizamos el estudio, sin tener en cuenta la variable costo:
+```{r ,echo=TRUE, warning=FALSE}
+borrar <- c("Costo") 
+dejar <- c("")
+dfAP <-dfAP[,!(names(dfAP) %in% borrar)]
+```
+De acuerdo a este resultado, un k=5, sería el ideal.
+```{r ,echo=TRUE, warning=FALSE}
+set.seed(80)
+
+cluster1 <- kmeans(dfAP[,15:17], centers=4)
+
+cluster2 <- kmeans(dfAP[,15:17], centers=3)
+
+cluster3 <- kmeans(dfAP[,15:17], centers=5)
+
+
+LB.scale<- as.data.frame(scale(dfAP[,15:17]))
+
+
+sumbt <- kmeans(LB.scale, center=1)$betweenss
+
+for (i in 2:10) sumbt[i] <- kmeans(LB.scale, centers=i)$betweenss
+plot(1:10,sumbt,type="b", xlab="numero de clusters",ylab="suma de cuadrados intergrupos")
+
+
+```
+
+```{r ,echo=FALSE, warning=FALSE}
+#Tomar sólo variables numéricas:
+
+dfNu <- c()
+dfNu <- data.frame(df)
+  
+cols.dejar <-  c("Contactos_Atendidos_telefono","Contactos_Atendidos_Chat","Contactos_Atendidos_Chatbot","Contactos_autoreporte_gestion_indirecta","Contactos_ofrecidos","Contestados_Chat_men_Umbral","Contestado_Tel_men_Umbral","AHT_Tel_min","AHT_Chat_min","SD06_ASA_Correo","gestion_autoreporte","SD05_Disponibilidad_de_la_mesa_de_servicio","No_masivos","Linea_Base","AHT_Tel_seg","AHT_chat_seg","Costo","AHT_Web_min")
+
+#Alta correlación 0: Contactos_Atendidos_Chatbot, SD06_ASA_Correo gestion_autoreporte,SD05_Disponibilidad_de_la_mesa_de_servicio, AHT_Tel_seg, AHT_chat_seg, Costo
+
+cols.dejar1 <-  c("Contactos_Atendidos_telefono","Contactos_Atendidos_Chat","Contactos_Atendidos_Chatbot","Contactos_ofrecidos","Contestados_Chat_men_Umbral","Contestado_Tel_men_Umbral","AHT_Tel_min","AHT_Chat_min","No_masivos","Linea_Base","AHT_Tel_seg","AH_chat_seg","Costo","AHT_Web_min")
+
+#Alta correlación 1: Contactos_Atendidos_Chatbot AHT_Tel_seg Costo
+
+cols.dejar2 <-  c("Contactos_Atendidos_telefono","Contactos_Atendidos_Chat","Contactos_Atendidos_Chatbot","Contactos_ofrecidos","Contestados_Chat_men_Umbral","Contestado_Tel_men_Umbral","AHT_Tel_min","AHT_Chat_min","No_masivos","Linea_Base","AHT_Tel_seg","AH_chat_seg","Costo","AHT_Web_min")
+
+#dfAP <-dfAP[,!(names(dfAP) %in% borrar)]
+
+dfNu <- dfNu[, names(dfNu) %in% cols.dejar, drop = F]  
+#Quitar segmento_lb
+#borrar <- c(segmento_LB) 
+#dfNu <- dfNu[, !(names(dfNu) %in% borrar)]  
+#dfNu  <-  dfNu[,(names(dfNu) %in% var_num)]
+#head(dfNu)
+#str(dfNu)
+```
+
+```{r ,echo=FALSE, warning=FALSE,message=FALSE}
+  
+#tmp <- cor(dfNu)
+#tmp[upper.tri(tmp)] <- 0
+#diag(tmp) <- 0
+
+#data.new <- 
+#  data[, !apply(tmp, 2, function(x) any(abs(x) > 0.80))]
+#head(data.new)
+
+
+library('caret')
+df.new = cor(dfNu)
+
+#hc=findCorrelation(df.new, cutoff = 0.65, verbose = TRUE)
+hc = findCorrelation(df.new, cutoff=0.4) # putt any value as a "cutoff" 
+hc = sort(hc)
+reduced_Data = dfNu[,-c(hc)]
+#head(reduced_Data)
+
+```
+<p>Aunque se vieron variables altamente correlacionadas, como Disponibilidad mesa de servicio, Contactos atendidos Bot, ASA Correo, Gestion Autoreporte, AHT Tel, AHT chat y Costo, se deside eliminar todas excepto mas tres últimas, ya que el modelo de cobro depende de estas para su diseño.</p>
+
+## Valores perdidos
+<p>Se identifican variables con valores perdidos y se realiza con la media.<p>
+<p>Se toma el argumento de KNN con la habilitación del parámetro numFun = median. Se realiza con  k=5, de acuerdo al gráfico de agrupamiento k-means anterior.<p>
+<p>Variables con datos nulos:</p>
+SD06_ASA_Correo
+gestion_autoreporte
+
+
+<p>Para estos valores perdidos (NA) se recorre en el daframe con las nuevas variables imputadas por el algoritmo de Gower.
+<p>
+
+```{r ,include=FALSE, message= FALSE, warning=FALSE}
+#summary(df)
+#tail(df)
+
+#Valores con NA
+#ncol(df)
+```
+
+<p> Se contaban con un contrato desde 2016 hasta agosto de 2019, donde inicia un nuevo RFP. Por lo tanto, no se deben tomar precios de antes de esta fecha, eran incoherentes porque el contrato anterior tenía otras condiciones, y no habían variables en el precio como IPC u otras indicativas de aumento gradual.</p>
+
+<p>No se identifican por los índices cuáles eran los valores perdidos (NA) , sólo se harán para los precios antes de agosto de 2019, se recorren en la base con las nuevas variables Costo_Imputada, las cuales se muestran como TRUE o FALSE, que significa que fueron o no imputadas por el algoritmo de Gower.
+<p>
+
+
+
+
+```{r ,include=FALSE, message= FALSE, warning=FALSE}
+colSums(is.na(df))
+
+###index_perdidos_ASACORREO <-which(is.na(df$SD06_ASA_Correo))
+###index_perdidos_GA<-which(is.na(df$gestion_autoreporte))
+index_perdidos_Costo <-which(is.na(df$Costo))
+#no aplica porqe los valores en cero eran de Operaciones
+
+dfNA <- c()
+
+dfNA <- data.frame(df)
+#head(dfNA)
+
+# S3 method for class 'data.frame', tomado de https://rdrr.io/cran/VIM/man/kNN.html
+dfNA <- 
+  kNN(
+  dfNA,
+  #variable = colnames(dfNA),
+  variable <- colnames(dfNA),
+  metric = NULL,
+  k = 5,
+  dist_var = colnames(dfNA),
+  #dist_var <- c("Costo"),
+  weights = NULL,
+  numFun = median,
+  catFun = maxCat,
+  makeNA = NULL,
+  NAcond = NULL,
+  impNA = TRUE,
+  donorcond = NULL,
+  mixed = vector(),
+  mixed.constant = NULL,
+  trace = FALSE,
+#  imp_var = TRUE,
+#  imp_suffix = "Imp",
+  addRandom = FALSE,
+  useImputedDist = TRUE,
+  weightDist = FALSE
+)
+
+###Valores perdidos:
+
+##Registros con Imputaciones realizadas para el campo ASA CORREO:
+#tabla_vpBPD <-df2[index_perdidos_ASACORREO,]
+tabla_vpCosto <-dfNA[index_perdidos_Costo,]
+dfNA<- dfNA[,1:18]
+tabla_vpCosto <- tabla_vpCosto[,1:18]
+kable(tabla_vpCosto, caption = "REGISTROS IMPUTADOS POR MEDIDA GOWER PARA COSTO") %>%
+  kable_styling(latex_options=c("striped", "hold_position"), position = "left") %>%
+  column_spec(1, bold = T, color = "gray", background = "#EAF5F9") %>%
+  column_spec(2, bold = T, color = "gray", background = "#DAF5FD") %>%
+  column_spec(3, bold = T, color = "gray", background = "#CAF2FF") %>%
+  column_spec(4, bold = T, color = "gray", background = "#A1E9FF") %>%
+   column_spec(5, bold = T, color = "gray", background = "#18D6F3") %>%
+   column_spec(6, bold = T, color = "gray", background = "#0FD8F7") %>%
+   column_spec(7, bold = T, color = "gray", background = "#03DEFF") %>%
+   column_spec(8, bold = T, color = "gray", background = "#07C0DC") %>%
+   column_spec(9, bold = T, color = "gray", background = "#13B2CA") %>%
+   column_spec(10, bold = T, color = "gray", background = "#13B2CA") %>%
+   column_spec(11, bold = T, color = "gray", background = "#13B2CA") %>%
+   column_spec(12, bold = T, color = "gray", background = "#22A6BA") %>%
+   column_spec(13, bold = T, color = "gray", background = "#22A6BA") %>%
+   column_spec(14, bold = T, color = "gray", background = "#A1E9FF") %>%
+  column_spec(15, bold = T, color = "gray", background = "#22A6BA") %>%
+   column_spec(16, bold = T, color = "gray", background = "#22A6BA") %>%
+   column_spec(17, bold = T, color = "gray", background = "#A1E9FF") %>%
+     column_spec(18, bold = T, color = "white", background = "#BA2246") %>%
+ #  column_spec(19, bold = T, color = "gray", background = "#A1E9FF") %>%
+#   column_spec(36, bold = T, color = "white", background = "#BA2246") %>%
+     add_footnote(c("Se observa si esa fila tuvo variable imputada en columna roja"), notation = "symbol")
+
+
+```
+
+
+## Valores extremos
+<p>Se analiza la presencia de posibles valores extremos (outliers) en las distintas variables:<p>
+- Contactos_Atendidos_telefono,
+- Contactos_Atendidos_Chat,
+- Contactos_Atendidos_Chatbot,
+- Contactos_autoreporte_gestion_indirecta,
+- Contactos_ofrecidos,
+Contestados_Chat_men_Umbral,
+Contestado_Tel_men_Umbral,
+- SD06_ASA_Correo,
+- SD05_Disponibilidad_de_la_mesa_de_servicio,
+- ASA_gestion_autoreporte,
+- No_masivos,
+- Linea_Base,
+- AHT_Tel_seg,
+- AHT_chat_seg 
+- Costo
+<p>Se tienene valores nulos para los registros antes de agosto de 2019, que era otro RFP</p>
+
+```{r plot_ve, echo=FALSE}
+par(mfrow=c(1,5)) 
+boxplot(dfNA$AHT_Tel_seg, main="AHT Telefono -seg" )
+boxplot(dfNA$AHT_chat_seg, main="AHT Chat -seg" )
+boxplot(dfNA$SD06_ASA_Correo, main="ASA Correo" )
+boxplot(dfNA$gestion_autoreporte, main="ASA gestion_autoreporte" )
+boxplot(dfNA$Contactos_ofrecidos, main="Contactos Ofrecidos todos los canales" )
+
+par(mfrow=c(1,4)) 
+boxplot(dfNA$Contactos_Atendidos_telefono, main="Atendidos Telefono" )
+boxplot(dfNA$Contactos_Atendidos_Chat, main="Atendidos Chat" )
+boxplot(dfNA$Contactos_autoreporte_gestion_indirecta, main="Atendidos Autoreporte" )
+boxplot(dfNA$Contactos_Atendidos_Chatbot, main="Atendidos Chatbot" )
+
+par(mfrow=c(1,4)) 
+boxplot(dfNA$Linea_Base, main="Linea base" )
+boxplot(dfNA$No_masivos, main="Numero de masivos" )
+boxplot(dfNA$Costo, main="Costo" )
+boxplot(dfNA$SD05_Disponibilidad_de_la_mesa_de_servicio, main="Disponibilidad Mesa de Servicio" )
+
+par(mfrow=c(1,4)) 
+boxplot(dfNA$Contestados_Chat_men_Umbral, main="Contactos Chat < Umbral" )
+boxplot(dfNA$Contestado_Tel_men_Umbral, main="Contactos Tel < Umbral" )
+
+
+
+```
+<p>Como se pude observar en la gráfica, los puntos son valor extremos. 
+Estos están en AHT telefono, AHT Chat, ASA Correo, ASA Gestion autoreporte, número de masivos, Disponibilidad mesa de servicios.
+Vemos valores extremos en AHT Chat, 
+Se muestran los valores en la siguiente salida:<p>
+
+```{r, echo=FALSE}
+values_AHTChat <- dfNA$AHT_chat_seg
+values_AHTChat <-boxplot.stats(values_AHTChat)$out
+idx <- which(dfNA$AHT_chat_seg %in% values_AHTChat) 
+#idx 
+AHT_outliers <- dfNA[idx,]
+#AHT_outliers
+
+rows.AHTCborrar <- c(45)#quitar costo cuando se tenga data
+#cols.borrar <- c("Fecha","AHT_Tel_min","AHT_Chat_min")
+
+df2 <- c()
+
+df2 <- data.frame(dfNA)
+
+df2 <- dfNA[! (dfNA$ID %in% rows.AHTCborrar),]
+#df2
+```
+<p>Se observa que para el AHT Chat, todos los outliers están en Operaciones y en los últimos meses, por lo que se borran estos datos. El único AHT Chat fuera de lo común en Tecnologia, fue del mes de abril-2020, con 1182 seg (19,7 min).</p>
+
+<p>Vemos valores extremos en AHT Telefono, 
+Se muestran los valores en la siguiente salida:</p>
+
+```{r, echo=FALSE}
+values_AHTT <- df2$AHT_Tel_seg
+values_AHTT <-boxplot.stats(values_AHTT)$out
+idx1 <- which(df2$AHT_Tel_seg %in% values_AHTT) 
+
+AHTT_outliers <- df2[idx1,]
+#AHTT_outliers
+
+#rows.AHTTborrar <- c(44,46,47,48,49,50)#quitar costo cuando se tenga data
+rows.AHTTborrar <- c()#quitar costo cuando se tenga data
+#cols.borrar <- c("Fecha","AHT_Tel_min","AHT_Chat_min")
+df2.1 <- c()
+
+df2.1 <- data.frame(df2)
+
+df2.1 <- df2[! (df2$ID %in% rows.AHTTborrar),]
+#df2.1
+
+
+
+```
+<p>Vemos valores extremos en AHT Teléfono para los meses de 03,05,06,07,08,09 de 2020, sin tener otra variable que los correlacione, por lo que se eliminan, importante para el modelo.</p>
+
+
+```{r, echo=FALSE}
+
+par(mfrow=c(1,5)) 
+boxplot(df2.1$AHT_Tel_seg, main="AHT Teléfono -seg" )
+boxplot(df2.1$AHT_chat_seg, main="AHT Chat -seg" )
+boxplot(df2.1$SD06_ASA_Correo, main="ASA Correo" )
+boxplot(df2.1$gestion_autoreporte, main="ASA gestion_autoreporte" )
+boxplot(df2.1$Contactos_ofrecidos, main="Contactos Ofrecidos todos los canales" )
+
+par(mfrow=c(1,4)) 
+boxplot(df2.1$Contactos_Atendidos_telefono, main="Atendidos Teléfono" )
+boxplot(df2.1$Contactos_Atendidos_Chat, main="Atendidos Chat TI" )
+boxplot(df2.1$Contactos_autoreporte_gestion_indirecta, main="Atendidos Autoreporte" )
+boxplot(df2.1$Contactos_Atendidos_Chatbot, main="Atendidos Chatbot" )
+
+par(mfrow=c(1,4)) 
+boxplot(df2.1$Linea_Base, main="Linea base" )
+boxplot(df2.1$No_masivos, main="Número de masivos" )
+boxplot(df2.1$Costo, main="Costo" )
+boxplot(df2.1$SD05_Disponibilidad_de_la_mesa_de_servicio, main="Disponibilidad Mesa de Servicio" )
+
+par(mfrow=c(1,4)) 
+boxplot(df2.1$Contestados_Chat_men_Umbral, main="Contactos Chat < Umbral" )
+boxplot(df2.1$Contestado_Tel_men_Umbral, main="Contactos Tel < Umbral" )
+
+```
+
+```{r, echo=TRUE}
+#masivos:
+values_masivos <- df2.1$Linea_Base
+values_masivos <-boxplot.stats(values_masivos)$out
+idxm <- which(df2.1$Linea_Base %in% values_masivos) 
+#idx 
+mas_outliers <- df2.1[idxm,]
+#mas_outliers
+#rows.masborrar <- c()#quitar costo cuando se tenga data
+#cols.borrar <- c("Fecha","AHT_Tel_min","AHT_Chat_min")
+
+df2.2 <- c()
+
+df2.2 <- data.frame(df2.1)
+
+#df <- df[, ! names(df) %in% cols.SQLborrar, drop = F]
+#df2.2 <- df2.1[! (df2.1$ID %in% rows.masborrar),]
+#df2.2
+
+
+```
+Outliers de masivos ya borrados. Ver nuevos graficos con outliers eliminados:
+
+```{r, echo=TRUE}
+par(mfrow=c(1,3)) 
+boxplot(dfNA$AHT_Tel_seg, main="AHT Teléfono -seg" )
+boxplot(dfNA$AHT_chat_seg, main="AHT Chat -seg" )
+#boxplot(dfNA$SD06_ASA_Correo, main="ASA Correo" )
+#boxplot(dfNA$gestion_autoreporte, main="ASA gestion_autoreporte" )
+boxplot(dfNA$Contactos_ofrecidos, main="Contactos Ofrecidos" )
+
+par(mfrow=c(1,3)) 
+boxplot(dfNA$Contactos_Atendidos_telefono, main="Atendidos Telefono" )
+boxplot(dfNA$Contactos_Atendidos_Chat, main="Atendidos Chat" )
+boxplot(dfNA$Contactos_autoreporte_gestion_indirecta, main="Atendidos Autoreporte" )
+#boxplot(dfNA$Contactos_Atendidos_Chatbot, main="Atendidos Chatbot" )
+
+par(mfrow=c(1,3)) 
+boxplot(dfNA$Linea_Base, main="Linea base" )
+boxplot(dfNA$No_masivos, main="N?mero de masivos" )
+boxplot(dfNA$Costo, main="Costo" )
+#boxplot(dfNA$SD05_Disponibilidad_de_la_mesa_de_servicio, main="Disponibilidad Mesa de Servicio" )
+
+par(mfrow=c(1,4)) 
+boxplot(dfNA$Contestados_Chat_men_Umbral, main="Contactos Chat < Umbral" )
+boxplot(dfNA$Contestado_Tel_men_Umbral, main="Contactos Tel < Umbral" )
+```
+
+## Correlaciones
+
+Nos proponemos analizar las relaciones entre las diferentes variables del conjunto de datos para ver cómo es esta correlación con los históricos que se tienen.
+
+
+
+```{r, echo=TRUE, message=FALSE,warning=FALSE}
+
+df3 <- c()
+
+df3 <- data.frame(df2.2)
+borrar <- c("Mesa","Fecha")
+df3 <- df3[ , !(names(df3) %in% borrar)]
+
+library("PerformanceAnalytics")
+df3.1 <- c()
+df3.1 <- df3[,1:3]
+chart.Correlation(df3[], histogram=TRUE, pch=35)
+chart.Correlation(df3[,1:6], histogram=TRUE, pch=19)
+chart.Correlation(df3[,7:12], histogram=TRUE, pch=19)
+chart.Correlation(df3[,13:15], histogram=TRUE, pch=19)
+#chart.Correlation(df3[,15:18], histogram=TRUE, pch=19)
+
+relacion_AHT_Tel <- c("AHT_Tel_seg","Contactos_Atendidos_telefono","Contactos_ofrecidos")
+chart.Correlation(df3[,relacion_AHT_Tel], histogram=TRUE, pch=19)
+
+relacion_AHT_Tel <- c("AHT_Tel_seg","Contactos_Atendidos_telefono","Contactos_ofrecidos")
+chart.Correlation(df3[,relacion_AHT_Tel], histogram=TRUE, pch=19)
+
+relacion_AHT_chat <- c("AHT_chat_seg","Contactos_Atendidos_Chat","Contactos_ofrecidos")
+chart.Correlation(df3[,relacion_AHT_chat], histogram=TRUE, pch=19)
+
+relacion_masivos <- c("No_masivos","Contactos_Atendidos_telefono","Contactos_Atendidos_Chat","Contactos_ofrecidos","AHT_Tel_seg","AHT_chat_seg")
+chart.Correlation(df3[,relacion_masivos], histogram=TRUE, pch=19)
+
+relacion_disponibilidad <- c("SD05_Disponibilidad_de_la_mesa_de_servicio","Contactos_Atendidos_telefono","Contactos_Atendidos_Chat","Contactos_ofrecidos","AHT_Tel_seg","AHT_chat_seg")
+chart.Correlation(df3[,relacion_disponibilidad], histogram=TRUE, pch=19)
+```
+<p></p>
+## Variables Correlacionadas para eliminar
+```{r, echo=FALSE}
+dfcorr <- c()
+cols.SQLborrar <- c("ID","Mesa","Fecha")
+
+dfcorr <- data.frame(df2.1)
+dfcorr <- dfcorr[, ! names(dfcorr) %in% cols.SQLborrar, drop = F]
+#str(df2.1)
+
+df2.new = cor(dfcorr)
+
+hc = findCorrelation(df2.new, cutoff=0.2) # putt any value as a "cutoff" 
+hc = sort(hc)
+reduced_Data1 = dfcorr[,-c(hc)]
+str(reduced_Data1)
+#SD06_ASA_Correo gestion_autoreporte
+#SD05_Disponibilidad_de_la_mesa_de_servicio AHT_chat_seg
+```
+
+<p>
+<p> La distribución de cada variable está en los cuadros diagonales. Por ejemplo, tienen buena distribución los contactos telefónicos antes del umbral, las variables AHT y los No_masivos.</p> 
+**En la parte de abajo de la diagonal**, está el gráfico de dispersión. Se observa que Linea base tiene una alta correlación con los contactos telefónicos < umbral.</p>
+**En la parte de arriba de la diagional** está el valor de correlación y el nivel de significación con número de estrellas. Cada nivel de significación está asociado al símbolo p-values(0, 0.001, 0.01, 0.05, 0.1, 1) <=> símbolos(“***”, “**”, “*”, “.”, " “). Por ejemplo, un dato interesante es que el AHT de Teléfono  tiene una baja correlación positiva con el AHT de chat (p-value de 0,26),x aumenta ligeramente cuando y lo hace.</p>
+Tambien, los contactos telefónicos antes del umbral y línea base están altamente correlacionados. Igualmente, los contactos atendidos de teléfono están altamente correlacionados con los de chat (p-value 0.98). Por último, los contactos ofrecidos y atendidos están altamente relacionados (p-value 0-99).</p>
+**Disponibilidad del servicio** NO tiene correlación con los contactos ofrecidos, atendidos y AHTs.</p>
+**Masivos** Los masivos definitivamente afectan los contactos ofrecidos y atendidos.</p>
+**Bots** Es interesante encontrar que la atención del chatbot ´tiene correlación de -0.73 con la gestión indirecta, es decir, que muchos de los casos que no resuelve el bot, tienen que ser gestionados indirectamente por los asesores humanos.</p>
+
+
+## Valores Nulos
+<p>Se encontraron que las variables altamente correlacionadas eran las que tenían tambien valores nulos, por lo que se decide eliminar (gestión autoreporte y asa correo).</p>
+<p>La variable costo por mejora bot o infraestructura, no es relevante para el modelo, por esto tambien se elimina.</p>
+```{r ,echo=TRUE, warning=FALSE}
+df1<- c()
+df1 <-data.frame(df)
+dfAP<-dfAP[!is.na(dfAP$SD06_ASA_Correo),]
+dfAP<-dfAP[!is.na(dfAP$gestion_autoreporte),]
+
+
+#df <- data.frame(df1)
+
+```
+
+# <b>Modelo de Predicción de costos</b>
+
+## Modelo de Regresion Lineal Multiple
+
+<p>a) Se estima el modelo de predicción de costo, tomando las medias bases de AHT de teléfono (580 segundos= 9,9 minutos) y chat (955 segundos= 15,91 min)</p>
+<p>a) Se toma la línea base.  </p>
+
+### Modelo 1: Regresión Lineal Múltiple con AHT de Referencia de teléfono y chat
+<p> Contractualmente el AHT referencia o de base está definido en 580 segundos para teléfono y 955 segundos para chat. Se toma este para un nuevo modelo:</p>
+```{r, echo=TRUE}
+#nivel de referencia del 
+
+df4.1 <- c()
+df4.1 <- data.frame(df2.1)
+#head(df2.1)
+df4.1 <- mutate(df4.1, AHT_Tel_Ref=ifelse(AHT_Tel_seg<=580,1,0)
+              )
+
+df5.1 <- c()
+df5.1 <- data.frame(df4.1)
+
+df5.1 <- mutate(df5.1, AHT_Chat_Ref=ifelse(AHT_chat_seg<=955,1,0)
+              )
+
+df5.1$AHT_Chat_Ref <- factor(df5.1$AHT_Chat_Ref)
+df5.1$AHT_Tel_Ref <- factor(df5.1$AHT_Chat_Ref)
+
+m1_Costo <- lm(Costo ~ Linea_Base+
+AHT_chat_seg+AHT_Tel_seg+
+No_masivos,
+#Contactos_Atendidos_TI_telefono+
+#Contactos_Atendidos_TI_Chat,
+#Costo, 
+data = df5.1)
+summary(m1_Costo)
+```
+### Modelo 2: Regresión Lineal Múltiple con AHT de Referencia de teléfono y chat + Contactos atendidos
+
+```{r, echo=TRUE}
+
+
+# MODELO 2, REGRESION LINEAL MULTIPLE CON AHT REFERENCIA AHTS TEL Y CHAT REFERENCIA")
+m2_Costo <- lm(Costo ~ Linea_Base+
+
+  AHT_Chat_Ref+
+    AHT_Tel_seg+
+No_masivos+
+Contactos_Atendidos_telefono+
+Contactos_Atendidos_Chat,
+#Costo, 
+data = df5.1)
+summary(m2_Costo)
+
+```
+### Modelo 3: Regresión Lineal Múltiple con AHT de Referencia de teléfono y chat + Contactos atendidos + masivos
+
+```{r, echo=TRUE}
+
+m3_Costo <- lm(Costo ~ Linea_Base+
+
+  AHT_Chat_Ref+AHT_Tel_Ref+
+No_masivos+
+Contactos_Atendidos_telefono+
+Contactos_Atendidos_Chat,
+#Costo, 
+data = df5.1)
+summary(m3_Costo)
+
+```
+### Modelo 4: Regresión Lineal Múltiple Costo: con AHTs, Disponibilidad, contactos, masivos y Línea base
+
+```{r, echo=TRUE}
+
+m4_Costo<- lm(Costo ~ Linea_Base+AHT_chat_seg+
+                 AHT_Tel_seg+
+               SD05_Disponibilidad_de_la_mesa_de_servicio+
+Contactos_Atendidos_telefono+
+Contactos_Atendidos_Chat+
+  Contactos_Atendidos_Chatbot+
+  No_masivos+
+ Contactos_autoreporte_gestion_indirecta+ 
+  Contactos_ofrecidos+
+  Contestados_Chat_men_Umbral+
+  SD06_ASA_Correo,#+
+#Costo, 
+data = df5.1)
+summary(m4_Costo)
+
+```
+### Modelo 5: Regresión Lineal Múltiple para predecir Costo y Línea base
+
+```{r, echo=TRUE}
+m5_Costo <- lm(Costo~Linea_Base+
+                 ###Al quitar el AHT Tel ref, se observa buena predicci?n
+                 #AHT_Tel_Ref+
+ #              SD05_Disponibilidad_de_la_mesa_de_servicio+
+  AHT_chat_seg+
+No_masivos+
+Contactos_Atendidos_telefono+
+Contactos_Atendidos_Chat,
+#Costo, 
+data = df5.1)
+summary(m5_Costo)
+
+```
+### Modelo 6: Regresión Lineal Múltiple para predecir Costo y Línea base con AHT Chat de Referencia
+Este presenta una muy buena predicción.
+```{r, echo=TRUE}
+
+
+m6_Costo <- lm(Costo ~ Linea_Base+
+                 ###Al quitar el AHT Tel ref, se observa buena predicci?n
+                 #AHT_Tel_Ref+
+ #              SD05_Disponibilidad_de_la_mesa_de_servicio+
+  AHT_chat_seg,
+#No_masivos,
+#Contactos_Atendidos_TI_telefono+
+#Contactos_Atendidos_TI_Chat,
+#Costo, 
+data = df5.1)
+summary(m6_Costo)
+
+```
+### Modelo 7: Regresión Lineal Múltiple para predecir Costo y Línea base con AHTS Referencia y contactos
+Este tambien presenta una buena predicción:
+```{r, echo=TRUE}
+m7_Costo <- lm(Costo ~ Linea_Base+
+                 ###Al quitar el AHT Tel ref, se observa buena predicci?n
+                 #AHT_Tel_Ref+
+Contactos_Atendidos_telefono+
+Contactos_Atendidos_Chat+
+AHT_chat_seg+
+AHT_Tel_seg+
+No_masivos,
+ data = df5.1)
+summary(m7_Costo)
+
+
+df6 <- c()
+df6 <- data.frame(df5.1)
+cols.dejar <- c("Costo","Linea_Base",
+                "Contactos_Atendidos_telefono",
+"Contactos_Atendidos_Chat",              
+"AHT_chat_seg","AHT_Tel_seg",
+"No_masivos")
+df6 <- df5.1[, names(df) %in% cols.dejar, drop = F]  
+
+
+```
+### Modelo 8: Regresión Lineal Múltiple para predecir con un costo referencia
+El costo promedio de la factura es de 660029877, para tomar de referencia en nuevo modelo:
+```{r, echo=TRUE}
+
+#Costo promedio de la factura de TI: 660029877, para tomar de referencia.
+df6.1 <- c()
+df6.1 <- data.frame(df6)
+#head(df2.1)  
+df6.1 <- mutate(df6, Costo_Ref=ifelse(Costo<=660029877,1,0)
+              )  
+#df6.1
+#df6.1$Costo_Ref  <- factor(df6.1$Costo_Ref)
+m8_Costo <- lm(Costo_Ref ~ Linea_Base+
+                 ###Al quitar el AHT Tel ref, se observa buena predicci?n
+                 #AHT_Tel_Ref+
+Contactos_Atendidos_telefono+
+Contactos_Atendidos_Chat+              
+AHT_chat_seg+
+AHT_Tel_seg+
+No_masivos,
+ data = df6.1)
+summary(m8_Costo)
+
+
+```
+### Modelo 9: Regresión Lineal Múltiple con costo referencia sin masivos ni AHT chat
+Este nuevo modelo se hace sin variables altamente relacionadas:
+```{r, echo=TRUE}
+m8_Costo <- lm(Costo_Ref ~ Linea_Base+
+                 ###Al quitar el AHT Tel ref, se observa buena predicci?n
+                 #AHT_Tel_Ref+
+Contactos_Atendidos_telefono+
+Contactos_Atendidos_Chat+              
+#AHT_chat_seg+
+AHT_Tel_seg,
+#No_masivos,
+ data = df6.1)
+summary(m8_Costo)
+
+```
+### Modelo 10: Regresión Lineal Múltiple para calcular Costo y Línea base sólo con AHT
+Este nuevo modelo se hace sin variables altamente relacionadas:
+```{r, echo=TRUE}
+#message("MODELO 10, REGRESI?N LINEAL M?LTIPLE S?LO AHT Y L?NEA BASE")
+m10_Costo <- lm(Costo ~ Linea_Base+
+                 ###Al quitar el AHT Tel ref, se observa buena predicci?n
+                 #AHT_Tel_Ref+
+AHT_chat_seg+
+AHT_Tel_seg,
+ data = df5.1)
+summary(m10_Costo)
+
+```
+<p>Con regresión logística, el mejor modelo es el número 7.</p>
+
+## Modelo 11: Random Forest
+Este nuevo modelo se hace sin variables altamente relacionadas:
+
+```{r, echo=FALSE,message= FALSE, warning=FALSE}
+
+
+library(randomForest)
+library(caret)
+
+set.seed(300)
+training.ids <- createDataPartition(df6$Costo,p=0.7,list=FALSE)
+
+m11_Costo <- randomForest(
+  x=df6.1[training.ids,1:6],
+    y=df6.1[training.ids,7],
+  ntree = 1000,
+  keep.forest=TRUE
+  )
+
+summary(m11_Costo)
+
+```
+<p> Comparación de actual y predicho en este modelo:</p>
+```{r, echo=TRUE}
+
+pred <- predict(m11_Costo, df6.1[-training.ids,])
+table(df6.1[-training.ids,"Costo"],pred,dnn=c("Actual","Predicho"))
+
+```
+
+### Normalidad, Shapiro y Residuos
+<p>Se toman los siguientes modelos para realizar este proceso: </p>
+#### Modelo 6
+
+```{r, echo=TRUE}
+
+#PREDICCIÓN para AHT 10 como normal y Contactos ofrecidos=5000, atendidos 2500
+ 
+qqnorm(m6_Costo$residuals)
+qqline(m6_Costo$residuals)
+shapiro.test(m6_Costo$residuals)
+
+```
+
+#### Modelo 7
+
+```{r, echo=TRUE}
+
+#PREDICCIÓN para AHT 10 como normal y Contactos ofrecidos=5000, atendidos 2500
+ 
+qqnorm(m7_Costo$residuals)
+qqline(m7_Costo$residuals)
+shapiro.test(m7_Costo$residuals)
+
+```
+
+#### Modelo 8
+
+```{r, echo=TRUE}
+
+#PREDICCIÓN para AHT 10 como normal y Contactos ofrecidos=5000, atendidos 2500
+ 
+qqnorm(m8_Costo$residuals)
+qqline(m8_Costo$residuals)
+shapiro.test(m8_Costo$residuals)
+
+```
+
+#### Modelo 10
+
+```{r, echo=TRUE}
+
+#PREDICCIÓN para AHT 10 como normal y Contactos ofrecidos=5000, atendidos 2500
+ 
+qqnorm(m10_Costo$residuals)
+qqline(m10_Costo$residuals)
+shapiro.test(m10_Costo$residuals)
+
+```
+
+
+
+## Predicción de precio para Modelos con mejor comportamiento
+Se toman los modelos 7 y modelos 10 para las predicciones.
+
+### Predicción modelo 7, superior rango 61020, AHT ponderado 968
+
+
+```{r, echo=TRUE}
+
+#message("PREDICCION MODELO 7, SUPERIOR rango 61020, AHT PONDERADO 968")
+prediccion5 <- predict(m7_Costo,
+data.frame(
+  Linea_Base=61020,
+  AHT_Tel_seg=968,
+           AHT_chat_seg=1109,
+           No_masivos=0,
+           Contactos_Atendidos_telefono=53393,
+           Contactos_Atendidos_Chat=22883
+           ), 
+interval = "confidence")
+prediccion5
+
+```
+
+### Predicción modelo 7, superior rango 68979, AHT ponderado 1148
+
+```{r, echo=TRUE}
+
+#message("PREDICCION MODELO 7, SUPERIOR rango 68979, AHT PONDERADO 1148")
+prediccion5.1 <- predict(m7_Costo,
+data.frame(
+  Linea_Base=68979,
+  AHT_Tel_seg=1148,
+           AHT_chat_seg=1315,
+           No_masivos=0,
+           Contactos_Atendidos_telefono=48285,
+           Contactos_Atendidos_Chat=20694
+           ), 
+interval = "confidence")
+prediccion5.1
+#class(prediccion5)
+#a <-toString(prediccion5.1)
+#summary(a)
+```
+
+```{r, echo=TRUE}
+
+```
+
+
+### NUEVA TABLA DE PRECIOS : Predicción completa modelo 7 
+
+
+```{r, echo=TRUE, warning=FALSE}
+tabla_ENT2<- data.frame( 
+LB_TI<-quantile(df6.1$Linea_Base, probs = seq(.1, .9, by = .1)),
+AHTT_TI<-quantile(df6.1$AHT_Tel_seg, probs = seq(.1, .9, by = .1)),
+AHTC_TI<-quantile(df6.1$AHT_chat_seg, probs = seq(.1, .9, by = .1)),
+Masivos<-quantile(df6.1$No_masivos, probs = seq(.1, .9, by = .1)),
+Atend_tel<-quantile(df6.1$Contactos_Atendidos_telefono, probs = seq(.1, .9, by = .1)),
+Atend_chat<-quantile(df6.1$Contactos_Atendidos_Chat, probs = seq(.1, .9, by = .1))
+)
+```
+
+```{r, echo=TRUE, warning=FALSE}
+prediccion82 <- predict(m7_Costo,
+data.frame(
+ Linea_Base=LB_TI,
+AHT_Tel_seg=AHTT_TI,
+           AHT_chat_seg=AHTC_TI,
+           No_masivos=Masivos,
+           Contactos_Atendidos_telefono=Atend_tel,
+           Contactos_Atendidos_Chat=Atend_chat
+           ), 
+interval = "confidence")  
+
+tabla_p82 <- data.frame(Linea_Base = LB_TI, prediccion82)
+
+```
+
+```{r, echo=TRUE, warning=FALSE}
+
+data1 <- cbind(ID = 1:nrow(tabla_ENT2), tabla_ENT2)  
+data2 <- cbind(ID = 1:nrow(tabla_p82), tabla_p82)  
+total2 <- merge(data1,data2,by=c("ID"))
+#kable(prediccion7,caption = "bancolombia") %>%
+#kable(p81,caption = "PREDICCIÓN MODELO 7") %>%
+
+total2["segmento_Linea_Base"] <- cut(total2$Linea_Base, breaks = c(0,3153,3438,3667,4052,4976,52550,56545,61376,63728), #10
+labels = c("LB 0-3153","LB 3154-3438","LB 3439-3667","LB 3668-4052","LB 4053-4976","LB 4977-52550","LB 52551-56545","LB 56546-61376","LB 61377-63727")) #9
+
+#Eliminar Linea_base
+total3 <- c()
+total3 <- data.frame(total2)
+
+cols.borrar <- c("Linea_Base")# se elimina por contar con los datos en segundos
+
+total3 <- total3[, ! names(total3) %in% cols.SQLborrar, drop = F]  
+  
+kable(total3,
+  col.names = c("Linea base","AHT Teléfono ","AHT Chat","Masivos","Contactos atendidos Tel" ,"Contactos Atendidos Chat" ,"LB","fit","lwr","upr","Segmento_Linea_Base"),
+      caption = "PREDICCIÓN MODELO 7") %>%
+  kable_styling(latex_options="scale_down", position = "left") %>%
+  row_spec(1, bold = T, color = "gray", background = "#EAF5F9") %>%
+  row_spec(2, bold = T, color = "gray", background = "#DAF5FD") %>%
+  row_spec(3, bold = T, color = "gray", background = "#CAF2FF") %>%
+  row_spec(4, bold = T, color = "gray", background = "#B9EFFF") %>%
+  row_spec(5, bold = T, color = "gray", background = "#A1E9FF") %>%
+  row_spec(6, bold = T, color = "white", background = "#49CFF7") %>%
+  row_spec(7, bold = T, color = "white", background = "#11C3F9") %>%
+  row_spec(8, bold = T, color = "white", background = "#0E9CC7") %>%
+  row_spec(9, bold = T, color = "white", background = "#147F9F") %>%
+#  row_spec(10, bold = T, color = "white", background = "#156077") %>%
+    add_footnote(c("Las clasificaciones fit, lwr y upr indican el ajuste, el mÍnimo y máximo estimado respectivamente."), notation = "symbol")
+
+
+```
+
+<p></p>
+### Resumen Predicción completa modelo 7 
+```{r, echo=FALSE, warning=FALSE}
+summary(prediccion82)
+```
+<p></p>
+# <b>Conclusiones</b>
+
+
+<p>Las variables que se han tomado para el modelo de precios, son las ampliamente utilizadas para la mayoría de modelos de cobro: línea base, AHT de teléfono, AHT de chat, número de masivos (o servicios nuevos), contactos atendidos y contado atendidos en chat.</p>
+<p>Los modelos indican que la variable de # de masivos afecta el resultado final de la linea base predicha. </p>
+<p>El AHT tambien afecta considerablemente la línea base y por lo tanto el costo.</p>
+<p>Se toma el modelo 7 para la nueva lista de precios con un p-value: 3.774e-12, mostró una distribución normal y su presición es aceptable.</p> 
+<p>Aunque la data muestra algunas variables altamente correlacionadas que se podrían eliminar, como el AHT Chat, este es necesario para el modelo de predicción. La data histórica no mostró esto, pero en la práctica todo call center se afecta por su tiempo de conversación. Por ejemplo, con un tiempo de conversación de 10 minutos se atiende una llamada, pero si el asesor demora 20 minutos con una llamada cuando debería atender dos en este tiempo, pues ahí se confirma que es bastante importante, por lo que se deben tomar en cuenta otras variables.</p>
+<p> Una de las variables que más afecta el AHT es un evento masivo (no entregado), que no se puede predecir, pero que ocasiona que el asesor se demore más por un tema que no tiene entregado o no sabe qué hacer. La data recogida mostró la relevancia de los eventos masivos.
+<p>Los contactos por bots estaban relacionados negativamente (-0.73) con la gestión indirecta. Esto se interpreta como que entre más contactos atienda el bot, menos contactos van a llegar a una asesor para atender indirectamente.</p>
+<p>En la tabla de precios predichos no se tuvo en cuenta estos contactos de bots, por tratarse de un medio bastante barato que no afecta en gran medida el costo. Sin embargo, entre más contactos haya en este canal, los costos se disminuyen, pero esto aplica para el proveedor de servicios, mas no para el cliente contratante si no lo tiene implementado como core. </p>
+<p>Es tambien bastante importante resaltar que aunque se podría aumentar la afectividad y precisión del modelo, se habría tenido que sacrificar importantes variables como el AHT o los contactos atendidos. </p>
+
+
+
+
+
+<p> </p>
+<p>
+<p>Fuentes:</p>
+<p> http://umh3067.edu.umh.es/wp-content/uploads/sites/240/2013/02/Modelos-Lineales-Aplicados-en-R.pdf </p>
+<p> https://rpubs.com/Joaquin_AR/226291</p>
+<p> https://rpubs.com/Cristina_Gil/Regresion_Lineal_Simple </p>
+<p> https://rpubs.com/Joaquin_AR/229736 </p>
+
+<p> https://thestatsgeek.com/2014/02/16/the-hosmer-lemeshow-goodness-of-fit-test-for-logistic-regression/  </p>
+ 
+<p> https://jllopisperez.com/2014/04/02/aplicacion-del-test-de-hosmer-lemeshow-en-medicina/ </p>
+ 
+<p> https://www.youtube.com/watch?v=MYW8gA1EQCQ </p>
+
+<p> https://www.youtube.com/watch?edufilter=NULL&v=HJB6XFkmezM&ab_channel=JuanGabrielGomilaSalas
+ </p>
